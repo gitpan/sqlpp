@@ -1,18 +1,12 @@
 #!/usr/bin/perl -w
 
-# $Id: sqlpp,v 1.6 2006/03/31 08:01:11 dk Exp $
+# $Id: sqlpp,v 1.7 2006/03/31 11:07:47 dk Exp $
 
 use strict;
 use vars qw($input $output @inc @context $context $sigdie %defines %macros $debug $VERSION);
 use vars qw(%global); # for perldef
 
-$VERSION = '0.02';
-
-$debug = 0;
-parse_argv();
-
-$context = new_context();
-parse_input();
+$VERSION = '0.03';
 
 # special predefined macros
 %defines = (
@@ -36,6 +30,21 @@ parse_input();
 	},
 );
 
+use constant MACRO_OFF     => 0; # none
+use constant MACRO_SIMPLE  => 1; # #defines with no-parameters only
+use constant MACRO_COMPLEX => 2; # #defines with parameters only
+use constant MACRO_ALL     => 3; # all #defines
+
+# run
+$debug = 0;
+
+$context = new_context( file => 'command line', macro => MACRO_OFF );
+parse_argv();
+
+$context = new_context();
+parse_input();
+
+
 # used for serving 'defined' call from #if, which is basically perl code
 sub is_defined { exists ($defines{$_[0]}) ? 1 : 0 }
 
@@ -47,11 +56,6 @@ $SIG{__DIE__} = sub {
 };
 parse_file(1);
 exit;
-
-use constant MACRO_OFF     => 0; # none
-use constant MACRO_SIMPLE  => 1; # #defines with no-parameters only
-use constant MACRO_COMPLEX => 2; # #defines with parameters only
-use constant MACRO_ALL     => 3; # all #defines
 
 # a context defines state of parser in a file
 sub new_context 
@@ -287,7 +291,7 @@ sub parse_line
 sub end_parse_line
 {
 	my $k = $_[0];
-	die "Bracket don't match at character ", pos($k->{var}) - $k-> {last_pos}, ", line $k->{ids}->[-1]->[1]\n"
+	die "Brackets don't match at character ", pos($k->{var}) - $k-> {last_pos}, ", line $k->{ids}->[-1]->[1]\n"
 		if @{$k-> {ids}};
 	push @{$k->{run}}, length($k->{var});
 	delete @$k{qw(run run_stack last_id last_pos last_id_pos_start ids)};
@@ -727,7 +731,10 @@ sub parse_argv
 				)) {
 				$d = $1;
 				die "Invalid define $d\n" unless $d =~ m/^([^\=]+)(?:\=(.*))?$/;
-				$defines{$1} = ( defined($2) ? $2 : '');
+				my ( $def, $body) = ( $1, $2);
+				my $v = begin_macro( $def );
+				parse_line( $v, defined($2) ? $2 : '');
+				end_macro( $v);
 			} elsif ( $d =~ /^o(.+)/ or 
 				( $d eq 'o' and 
 					( defined $ARGV[$i+1] or die "Argument required\n") and 
@@ -824,7 +831,9 @@ with C<< << >>.
 Analogous to cpp. 
 
 Note: EXPRESSION is evaluated via perl runtime engine, and although can execute
-arbitrary perl code, it is recommended to use simple arithmetic operators.
+arbitrary perl code, it is recommended to use simple arithmetic operators. To 
+operate with defines as strings, use double quotes.
+
 The C<defined()> function works like in cpp, not like in perl.
 
 =item #ifdef, #ifndef, #else, #endif, #undef, #include, #error

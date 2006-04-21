@@ -1,12 +1,12 @@
 #!/usr/bin/perl -w
 
-# $Id: sqlpp,v 1.7 2006/03/31 11:07:47 dk Exp $
+# $Id: sqlpp,v 1.12 2006/04/19 14:12:52 dk Exp $
 
 use strict;
 use vars qw($input $output @inc @context $context $sigdie %defines %macros $debug $VERSION);
 use vars qw(%global); # for perldef
 
-$VERSION = '0.03';
+$VERSION = '0.04';
 
 # special predefined macros
 %defines = (
@@ -64,9 +64,10 @@ sub new_context
 		line       => 0,
 		buf        => '',
 		in_comment => 0,
-		ifdef      => [{state => 1,depth => 0,passive=>[]}],
+		ifdef      => [{state => 1,passive=>[]}],
 		in_sql     => 0,
 		macro      => MACRO_ALL,
+		strip      => 1,
 		@_
 	}
 }
@@ -158,11 +159,25 @@ sub parse_line
 			$context-> {multiline_comment} = 0 if $1;
 			redo;
 		};
-		$k->{sql_comments} and $k-> {var} =~ m/\G\-\-.*$/gc and redo;
+		( $k-> {var} =~ m/\G--/ or (
+			not $k-> {macro} and $k-> {var} =~ m/\G#/
+		)) and do {
+			if ( $context->{strip}) {
+				my $savepos = pos( $k-> {var});
+				$k-> {var} =~ s/\G.*$//g;
+				pos( $k-> {var}) = $savepos;
+			} elsif ( $k-> {macro}) {
+				$k-> {var} =~ m/\G--/gc;
+			} else {
+				$k-> {var} =~ m/\G(--|#)/gc;
+			}
+			redo;
+		};
 		$k-> {var} =~ m/\G\/\*/gcs and do {
 			$context-> {multiline_comment} = 1;
 			redo;
 		};
+		$k-> {var} =~ m/\G-+/gc and redo;
 
 		# do identifiers
 		$k-> {var} =~ m/\G(\w+)/gcs and do {
@@ -204,10 +219,11 @@ sub parse_line
 			print "- open\n" if $debug;
 			redo;
 		};
-
+	
 		# nulling ID after right after comments and IDs are processed is basically
-		# a grammar rule that states that in a macro call nothing except a comment can be 
-		# present between a macro ID and an opening bracket
+		# a grammar rule that states that in a macro call nothing except a comment 
+		# and whitespace can be present between a macro ID and an opening bracket
+		$k-> {var} =~ m/\G\s+/gcs and redo;
 		$k-> {last_id} = '';
 
 		# do closing bracket
@@ -269,16 +285,11 @@ sub parse_line
 		$full and $k-> {var} =~ m/\G'[^']*'/gcs and redo;
 
 		# everything else
-		if ( $k->{macro} and $full) {
-			$k-> {var} =~ m/\G[^\w\(\)\'\-\/\,\#]+/gcs and redo;
-		} elsif ( $k->{macro}) {
-			$k-> {var} =~ m/\G[^\w\-\/\#]+/gcs and redo;
-		} elsif ( $full) {
-			$k-> {var} =~ m/\G[^\w\(\)\'\-\/\,]+/gcs and redo;
+		if ( $full) {
+			$k-> {var} =~ m/\G[^\w\(\)\'\-\,\#]+/gcs and redo;
 		} else {
-			$k-> {var} =~ m/\G[^\w\-\/]+/gcs and redo;
+			$k-> {var} =~ m/\G[^\w\-\#]+/gcs and redo;
 		}
-		$k-> {var} =~ m/\G[\-\/]+/gcs and redo;
 		!$full and $k-> {var} =~ m/\G[\(\)\']+/gcs and redo;
 
 		print "? stop at ", pos($k-> {var}), "\n" if $debug;
@@ -405,6 +416,42 @@ sub end_macro
 	delete @$handle{qw(parametric macro)};
 }
 
+sub parse_pragma
+{
+	my ( $pragma, $param) = @_;
+	if ( $pragma eq 'macro') {
+		if ( $param eq 'simple') {
+			$context->{macro} = MACRO_SIMPLE;
+		} elsif ( $param eq 'all') {
+			$context->{macro} = MACRO_ALL;
+		} elsif ( $param eq 'off') {
+			$context->{macro} = MACRO_OFF;
+		} else {
+			die "Invalid '#pragma macro($param)': should be 'all', 'simple', or 'off'\n";
+		}
+	} elsif ( $pragma eq 'comment') {
+		if ( $param eq 'strip') {
+			$context->{strip} = 1;
+		} elsif ( $param eq 'leave') {
+			$context->{strip} = 0;
+		} else {
+			die "Invalid '#pragma comments($param)': should be 'strip' or 'leave'\n";
+		}
+	} elsif ( $pragma eq 'lang') {
+		if ( $param eq 'sql') {
+			parse_pragma(qw(macro all));
+			parse_pragma(qw(comment strip));
+		} elsif ( $param eq 'leave') {
+			parse_pragma(qw(macro simple));
+			parse_pragma(qw(comment leave));
+		} else {
+			die "Invalid '#pragma lang($param)': should be 'sql' or 'perl'\n";
+		}
+	} else {
+		die "Unknown #pragma $pragma\n";
+	}
+}
+
 # if a line begins with #, then parse_comment checks it first
 sub parse_comment
 {
@@ -419,13 +466,15 @@ sub parse_comment
 		$what = $1;
 	}
 
-	# parse if/else/endif in the passive code less heavily
+	# parse if/else/elif/endif in the passive code less heavily
 	unless ( $context->{ifdef}->[-1]->{state}) {
 		if ( $what =~ /^if(n?def)?$/) {
 			push @{$context->{ifdef}->[-1]->{passive}}, 1; # flipsleft
 		} elsif ( $what eq 'else') {
 			goto NORMAL unless @{$context->{ifdef}->[-1]->{passive}};
 			die "Too many #else\n" unless $context->{ifdef}->[-1]->{passive}->[-1]--;
+		} elsif ( $what eq 'elif') {
+			goto NORMAL unless @{$context->{ifdef}->[-1]->{passive}};
 		} elsif ( $what eq 'endif') {
 			goto NORMAL unless @{$context->{ifdef}->[-1]->{passive}};
 			pop @{$context->{ifdef}->[-1]->{passive}};
@@ -523,9 +572,9 @@ NORMAL:
 		my $notdef = length($1) ? 1 : 0;
 		push @{$context->{ifdef}}, {
 			state => exists($defines{$def}) ? !$notdef : $notdef,
-			depth => 0,
 			flipsleft => 1,
 			passive => [],
+			do_else => exists($defines{$def}) ? $notdef : !$notdef,
 		};
 	} elsif ( $what eq 'if') {
 		my $do_ml = 1;
@@ -542,26 +591,47 @@ NORMAL:
 		die $@ if $@;
 		push @{$context->{ifdef}}, {
 			state => $ret ? 1 : 0,
-			depth => 0,
 			flipsleft => 1,
 			passive => [],
+			do_else => ( $ret ? 0 : 1),
 		};
+		$eatline = 0;
+	} elsif ( $what eq 'elif') {
+		die "Runaway #elif\n" if 
+			0 == $#{$context->{ifdef}} or 
+			@{$context->{ifdef}->[-1]->{passive}};
+		my $do_ml = 1;
+		my $v = begin_line;
+		while ( $do_ml) {
+			my $l = getline;
+			chomp $l;
+			$do_ml = $l =~ s/\\\s*$//;
+			$l =~ s/defined\s*\(([^\)\s]+)\s*\)\s*/is_defined($1)/ge; # XXX a hack
+			parse_line( $v, $l . ( $do_ml ? "\n" : ''));
+		}
+		my $if = end_line($v);
+		if ( $context->{ifdef}->[-1]->{do_else}) {
+			my $ret = eval $if;
+			die $@ if $@;
+			$context->{ifdef}->[-1]->{state} = ($ret ? 1 : 0);
+			$context->{ifdef}->[-1]->{do_else} = 0 if $ret;
+		} else {
+			$context->{ifdef}->[-1]->{state} = 0;
+		}
 		$eatline = 0;
 	} elsif ( $what eq 'else') {
 		die "Runaway #else\n" if 
-			0 ==  $#{$context->{ifdef}} or 
+			0 == $#{$context->{ifdef}} or 
 			@{$context->{ifdef}->[-1]->{passive}};
-		if ( $context->{ifdef}->[-1]->{depth} == 0) {
-			die "Too many #else\n" unless $context->{ifdef}->[-1]->{flipsleft}--;
-			$context->{ifdef}->[-1]->{state} = $context->{ifdef}->[-1]->{state} ? 0 : 1;
-		}
+		die "Too many #else\n" unless $context->{ifdef}->[-1]->{flipsleft}--;
+		$context->{ifdef}->[-1]->{state} = $context->{ifdef}->[-1]->{state} ? 
+			0 : 
+			$context->{ifdef}->[-1]->{do_else};
 	} elsif ( $what eq 'endif') {
 		die "Runaway #endif\n" if
 			0 == $#{$context->{ifdef}} or
 			@{$context->{ifdef}->[-1]->{passive}};
-		if ( $context->{ifdef}->[-1]->{depth}-- == 0) {
-			pop @{$context->{ifdef}};
-		}
+		pop @{$context->{ifdef}};
 	} elsif ( $what eq 'error') {
 		die getline;
 	} elsif ( $what eq 'include') {
@@ -595,17 +665,12 @@ NORMAL:
 		parse_file(1);
 		$context = pop @context;
 		close $input;
-	} elsif ( $what eq 'macro') {
-		$what = gettok();
-		if ( $what eq 'simple') {
-			$context->{macro} = MACRO_SIMPLE;
-		} elsif ( $what eq 'all') {
-			$context->{macro} = MACRO_ALL;
-		} elsif ( $what eq 'off') {
-			$context->{macro} = MACRO_OFF;
-		} else {
-			die "Invalid 'macro' command: should be all, simple, or off\n";
-		}
+	} elsif ( $what eq 'pragma') {
+		my $pragma = gettok();
+		my $param = length($context->{buf}) ? getline() : '';
+		$param =~ s/^[\s\(]*(\w+)[\s\)\#]*$/$1/m;
+
+		parse_pragma( $pragma, $param);
 	} elsif ( $what eq 'perldef') {
 		$eatline = 0;
 		my $heredoc = $context->{buf} =~ s/^<<//;
@@ -674,7 +739,6 @@ sub parse_file
 	my $do_output = $_[0];
 	my $l;
 	my $h = begin_line;
-	$h-> {sql_comments} = 1;
 	while ( defined ( $l = getline(1))) {
 		if ( !$context->{multiline_comment} and $l =~ s/^#//) {
 			$context->{buf} = $l;
@@ -744,7 +808,7 @@ sub parse_argv
 				$output = $1;
 			} elsif ( $d eq '?' or $d eq 'h' or $d eq '-help') {
 				print <<USAGE;
-sqlpp - SQL preprocessor
+sqlpp - simple SQL preprocessor v$VERSION
 
 sqlpp [options] filename
 
@@ -836,18 +900,18 @@ operate with defines as strings, use double quotes.
 
 The C<defined()> function works like in cpp, not like in perl.
 
-=item #ifdef, #ifndef, #else, #endif, #undef, #include, #error
+=item #ifdef, #ifndef, #else, #elif, #endif, #undef, #include, #error
 
 Identical to cpp
 
-=item #macro simple|all|off
+=item #pragma macro(simple|all|off)
 
-Pragma C<#macro> defines how defines and macros should be tracked and
+Pragma C<macro> defines how defines and macros should be tracked and
 substituted.  The reason is that SQL code may contain non-SQL code that is so
 complicated that would confuse the macro parser. Such sections can be guarded
-with C<#macro simple>/C<#macro all> brackets, for example.
+with C<#pragma macro(simple)>/C<#pragma macro(all)> brackets, for example.
 
-There are three C<#macro> modes:
+There are three C<macro> modes:
 
 =over
 
@@ -864,6 +928,32 @@ Defines are substituted, macros are not substituted.
 Both defines are macros are substituted.
 
 =back
+
+=item #pragma comments(strip|leave)
+
+Pragma C<comments> tells what to do with C<#> and C<--> comments. The default
+is C<strip> these from the output, however, the parts of input that are not
+SQL, can be guarded from incorrect parsing by C<#pragma comments(leave)>/
+C<#pragma comments(strip)> macros. Note that C<#> comments are
+ineffectual in macro definitions, because C<#> is a macro concatenation symbol.
+
+=item #pragma lang(sql|perl)
+
+A combination of existing pragmas. 
+
+=over
+
+=item sql
+
+Same as C<#pragma macro(all)> and C<#pragma comments(strip)>. These are defaults settings.
+
+=item perl
+
+Same as C<#pragma macro(simple)> and C<#pragma comments(leave)>. 
+Useful if perl code is embedded.
+
+=back
+
 
 =item #perldef TAG [(PARAMETERS)] CODE
 

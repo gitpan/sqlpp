@@ -1,4 +1,4 @@
-# $Id: test.t,v 1.1 2005/10/06 14:52:48 dk Exp $
+# $Id: test.t,v 1.4 2006/04/19 14:12:52 dk Exp $
 # yes, this is somewhat strange -- but if this fails, everything will as well
 #if $global{num} = 1;
 #endif
@@ -115,3 +115,49 @@ test( heredoc, abc)
 "$a\n$b\n$c\n"
 hereperl
 test( hereperl(1,2,3), abc)
+
+# -- 18
+test( hereperl    (1,2,3), abc)
+
+# -- 19
+#define A B--comment that should be stripped
+test(A,B)
+#undef A
+
+#pragma comment(leave)
+
+# -- 20
+#define A B--C
+test(A,B--C)
+#undef A
+
+# -- 21
+#perldef A 'B#C'
+test(A,B#C)
+#undef A
+
+# -- 22
+#define A 1
+#define B 0
+#if 0
+#elif A
+ok
+#elif A
+fail
+#else
+fail
+#endif
+
+# --23
+#if 0
+#elif B
+fail
+#elif B
+fail
+#elif B
+fail
+#else
+ok
+#endif
+
+#pragma comment(strip)

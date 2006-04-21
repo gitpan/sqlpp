@@ -1,5 +1,4 @@
-VERSION=0.03
-
+VERSION!=perl -ne 'print $$1 if m/VERSION = .(.*).;/' sqlpp 
 DEST!=perl -MConfig -e 'print $$Config{installsitebin}'
 
 all:

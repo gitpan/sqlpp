@@ -1,5 +1,6 @@
-# $Id: test.t,v 1.4 2006/04/19 14:12:52 dk Exp $
+# $Id: test.t,v 1.5 2006/05/16 11:03:54 dk Exp $
 # yes, this is somewhat strange -- but if this fails, everything will as well
+1..23
 #if $global{num} = 1;
 #endif
 

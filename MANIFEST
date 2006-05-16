@@ -1,0 +1,7 @@
+MANIFEST
+Makefile.PL
+test.t
+test.pl
+README
+bin/sqlpp
+META.yml                                 Module meta-data (added by MakeMaker)

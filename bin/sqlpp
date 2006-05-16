@@ -1,12 +1,12 @@
 #!/usr/bin/perl -w
 
-# $Id: sqlpp,v 1.12 2006/04/19 14:12:52 dk Exp $
+# $Id: sqlpp,v 1.13 2006/05/16 11:03:54 dk Exp $
 
 use strict;
 use vars qw($input $output @inc @context $context $sigdie %defines %macros $debug $VERSION);
 use vars qw(%global); # for perldef
 
-$VERSION = '0.04';
+$VERSION = '0.05';
 
 # special predefined macros
 %defines = (
